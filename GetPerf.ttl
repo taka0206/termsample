@@ -1,0 +1,308 @@
+﻿; Tera Term 5.6+ / TTSSH. Start THIS macro on Windows.
+; ここだけ設定。空欄なら接続先と取得元はダイアログ、保存先はユーザープロファイル配下。
+SSH_HOST      = ''
+SSH_PORT      = 22
+REMOTE_PARENT = ''
+LOCAL_BASE    = ''
+AUTH_MODE     = 'ask'     ; ask = 毎回入力 / saved = 初回だけ登録（Windows DPAPI）
+SHOW_RESULT   = 1         ; 0 = 完了・エラーのダイアログを省略
+TIME_LIMIT    = 7200      ; 書庫作成と SCP 受信のそれぞれの待ち時間（秒）
+
+owned = 0
+hasLocalRun = 0
+worker = 0
+stage = ''
+runDir = ''
+loginSecret = ''
+rootSecret = ''
+err = ''
+exitCode = 1
+getver ttver '5.6'
+if result < 0 then
+    err = 'Tera Term 5.6 以降で実行してください。'
+    goto failed
+endif
+if paramcnt >= 2 then
+    strcompare param2 'saved-worker'
+    if result = 0 worker = 1
+endif
+if worker then
+    getenv 'TT_PERF_HOST' SSH_HOST
+    getenv 'TT_PERF_PARENT' REMOTE_PARENT
+    getenv 'TT_PERF_LOGIN' loginSecret
+    getenv 'TT_PERF_ROOT' rootSecret
+    ; Clear inherited secrets before starting any child process.
+    setenv 'TT_PERF_LOGIN' ''
+    setenv 'TT_PERF_ROOT' ''
+endif
+strlen SSH_HOST
+if result = 0 then
+    inputbox 'RHEL サーバーのホスト名または IPv4 アドレス' 'perf 取得'
+    SSH_HOST = inputstr
+endif
+strlen REMOTE_PARENT
+if result = 0 then
+    inputbox 'perf の親ディレクトリを絶対パスで入力（例 /var/log/app）' 'perf 取得'
+    REMOTE_PARENT = inputstr
+endif
+strmatch SSH_HOST '\A[A-Za-z0-9][A-Za-z0-9.-]{0,126}\z'
+if result = 0 then
+    err = '接続先は DNS 名または IPv4 アドレスで指定してください。'
+    goto failed
+endif
+if SSH_PORT < 1 || SSH_PORT > 65535 || TIME_LIMIT < 1 || TIME_LIMIT > 82800 then
+    err = 'SSH_PORT は 1～65535、TIME_LIMIT は 1～82800 秒で指定してください。'
+    goto failed
+endif
+strmatch REMOTE_PARENT '\A/[^\x00-\x1f\x7f]*\z'
+if result = 0 then
+    err = '取得元には perf の親ディレクトリの絶対パスを指定してください。'
+    goto failed
+endif
+strlen REMOTE_PARENT
+if result > 480 then
+    err = '取得元のパスは UTF-8 で 480 バイト以内にしてください。'
+    goto failed
+endif
+strmatch AUTH_MODE '\A(ask|saved)\z'
+if result = 0 then
+    err = 'AUTH_MODE は ask または saved です。'
+    goto failed
+endif
+getdir scriptDir
+makepath collector scriptDir 'collect-perf.sh'
+makepath helper scriptDir 'PerfLocal.ps1'
+filesearch collector
+if result = 0 goto missing
+filesearch helper
+if result = 0 goto missing
+getenv 'SystemRoot' windir
+makepath psExe windir 'Sysnative\WindowsPowerShell\v1.0\powershell.exe'
+filesearch psExe
+if result = 0 makepath psExe windir 'System32\WindowsPowerShell\v1.0\powershell.exe'
+sprintf2 psBase '"%s" -NoLogo -NoProfile -ExecutionPolicy Bypass -File ".\PerfLocal.ps1" -Action ' psExe
+setenv 'TT_PERF_HOST' SSH_HOST
+setenv 'TT_PERF_PARENT' REMOTE_PARENT
+int2str portText SSH_PORT
+setenv 'TT_PERF_PORT' portText
+
+strcompare AUTH_MODE 'saved'
+if result = 0 && worker = 0 then
+    ; DPAPI helper starts this same macro once. Its command line has no secrets.
+    getttdir ttDir
+    makepath macroExe ttDir 'ttpmacro.exe'
+    setenv 'TT_PERF_EXE' macroExe
+    fileCmd = psBase
+    strconcat fileCmd 'Saved'
+    exec fileCmd 'show' 1 scriptDir
+    exitCode = result
+    if exitCode = 90 || exitCode = -1 then
+        err = '保存認証の準備に失敗しました。PowerShell の表示または README_ja.txt を確認してください。'
+        goto failed
+    endif
+    setexitcode exitCode
+    end
+endif
+
+; Validate a new local destination before opening SSH.
+strlen LOCAL_BASE
+if result = 0 then
+    getenv 'USERPROFILE' profileDir
+    makepath LOCAL_BASE profileDir 'PerfDownloads'
+endif
+strmatch LOCAL_BASE '\A[A-Za-z]:\\'
+if result = 0 then
+    err = 'LOCAL_BASE には C:\Work\Perf のようなドライブの絶対パスを指定してください。'
+    goto failed
+endif
+getdate stamp '%Y%m%d_%H%M%S'
+random runNumber 99999999
+sprintf2 leaf '%s_%s_%08d' SSH_HOST stamp runNumber
+makepath runDir LOCAL_BASE leaf
+strlen runDir
+if result > 230 then
+    err = '保存先のパスが長すぎます。LOCAL_BASE を短くしてください。'
+    goto failed
+endif
+setenv 'TT_PERF_RUN' runDir
+fileCmd = psBase
+strconcat fileCmd 'Prepare'
+exec fileCmd 'hide' 1 scriptDir
+if result != 0 then
+    err = '保存先を準備できません。書き込み権限、同名フォルダー、PowerShell の実行可否を確認してください。'
+    goto failed
+endif
+hasLocalRun = 1
+
+; Never act on an existing terminal belonging to the operator.
+testlink
+if result != 0 unlink
+owned = 1
+connect '/DS /NOLOG /AUTOWINCLOSE=off /KR=UTF-8 /KT=UTF-8'
+testlink
+if result != 1 then
+    err = '専用の未接続 Tera Term ウィンドウを開けませんでした。'
+    goto failed
+endif
+setecho 0
+sprintf2 conn '%s:%d /ssh /2 /auth=password /user=spfai001 /timeout=45' SSH_HOST SSH_PORT
+if worker then
+    strlen loginSecret
+    if result = 0 goto noCredential
+    strlen rootSecret
+    if result = 0 goto noCredential
+    strconcat conn ' /passwd="'
+    strconcat conn loginSecret
+    strconcat conn '"'
+else
+    strconcat conn ' /ask4passwd'
+endif
+; This second connect uses the already-linked idle instance (no new process).
+connect conn
+connRc = result
+conn = ''
+loginSecret = ''
+if connRc != 2 then
+    err = 'SSH 接続に失敗しました。ホスト鍵、接続先、認証を確認してください。'
+    goto failed
+endif
+
+; Replace this dedicated shell before sending the job. Echoed text cannot
+; match the ready marker because printf assembles that marker at runtime.
+timeout = 60
+sendbinary 'if [ "$(/usr/bin/id -un)" = spfai001 ]; then stty icanon -echo -inlcr -igncr icrnl && printf "\nPF_%s;\n" BOOT && exec /bin/bash --noprofile --norc /dev/tty; else printf "\nPF_%s;\n" WRONG_USER; fi' #10
+waitregex 'PF_BOOT;' 'PF_WRONG_USER;'
+if result != 1 then
+    err = 'spfai001 のログインシェルを確認できませんでした。'
+    goto failed
+endif
+; Two quoted here-docs keep the parent path data-only and avoid shell quoting.
+sendbinary "IFS= read -r pf_parent <<'__TT_PERF_PARENT__'" #10
+sendbinary REMOTE_PARENT #10
+sendbinary '__TT_PERF_PARENT__' #10
+sendbinary 'exec /bin/bash -s -- "$pf_parent" <<' #39 '__TT_PERF_JOB__' #39 #10
+fileopen fh collector 0 1
+if fh < 0 goto missing
+while 1
+    filereadln fh jobLine
+    if result != 0 break
+    sendbinary jobLine #10
+endwhile
+fileclose fh
+sendbinary '__TT_PERF_JOB__' #10
+
+failPattern = 'PF_FAIL:([A-Z0-9_]+);'
+waitregex 'PF_STAGE:(/var/tmp/ttperf\.[A-Za-z0-9]{10});' failPattern
+if result = 2 goto remoteFail
+if result != 1 goto remoteTimeout
+stage = groupmatchstr1
+timeout = 120
+waitregex 'PF_ROOT;' '(?i)^[ \t]*password[ \t]*:' failPattern
+if result = 3 goto remoteFail
+if result = 0 goto remoteTimeout
+if result = 2 then
+    if worker = 0 then
+        passwordbox 'su で使用する root のパスワード' 'RHEL root'
+        rootSecret = inputstr
+        inputstr = ''
+        strlen rootSecret
+        if result = 0 goto noCredential
+    endif
+    sendbinary rootSecret #10
+    rootSecret = ''
+    waitregex 'PF_ROOT;' failPattern '(?i)^[ \t]*password[ \t]*:'
+    if result = 2 goto remoteFail
+    if result != 1 then
+        err = 'su で UID 0 を確認できませんでした。root 認証と PAM の設定を確認してください。'
+        goto failed
+    endif
+endif
+rootSecret = ''
+timeout = TIME_LIMIT
+readyPattern = 'PF_READY:([0-9]+):([a-f0-9]{64}):([A-Z_]+):([0-9]+):([0-9]+);'
+waitregex readyPattern failPattern
+if result = 2 goto remoteFail
+if result != 1 goto remoteTimeout
+setenv 'TT_PERF_BYTES' groupmatchstr1
+setenv 'TT_PERF_HASH' groupmatchstr2
+setenv 'TT_PERF_MODE' groupmatchstr3
+setenv 'TT_PERF_FILES' groupmatchstr4
+setenv 'TT_PERF_DIRS' groupmatchstr5
+int2str limitText TIME_LIMIT
+setenv 'TT_PERF_LIMIT' limitText
+
+makepath part runDir 'perf.tar.gz.part'
+sprintf2 remoteFile '%s/perf.tar.gz' stage
+scprecv remoteFile part
+fileCmd = psBase
+strconcat fileCmd 'Receive'
+exec fileCmd 'hide' 1 scriptDir
+localRc = result
+
+; Release only this run's staging area. The server also cleans up on disconnect.
+cleanRc = 0
+testlink
+if result = 2 then
+    sendbinary 'PF_RELEASE' #10
+    timeout = 30
+    waitregex 'PF_CLEAN;' failPattern
+    cleanRc = result
+endif
+if cleanRc = 1 stage = ''
+if localRc != 0 && localRc != 2 then
+    err = '受信・検証または展開に失敗しました。保存先の transfer.log を確認してください。'
+    goto failed
+endif
+if cleanRc != 1 then
+    err = 'Windows 側への保存後、サーバーの一時領域を削除したことを確認できませんでした。'
+    goto failed
+endif
+closett
+if localRc = 2 then
+    sprintf2 msg '書庫を保存しました。自動展開を見送った理由は transfer.log にあります。'#13#10'%s' runDir
+else
+    sprintf2 msg 'SHA-256 と展開件数を確認しました。'#13#10'%s\perf' runDir
+endif
+if SHOW_RESULT messagebox msg 'perf 取得'
+setexitcode localRc
+end
+
+:missing
+err = 'GetPerf.ttl、PerfLocal.ps1、collect-perf.sh を同じフォルダーに置いてください。'
+goto failed
+:noCredential
+err = 'パスワードを取得できなかったため処理を終了しました。'
+goto failed
+:remoteFail
+sprintf2 err 'RHEL 側で処理を終了しました（%s）。対処は README_ja.txt を参照してください。' groupmatchstr1
+goto failed
+:remoteTimeout
+err = 'RHEL 側の応答を待機中にタイムアウト、または接続が切断されました。'
+:failed
+rootSecret = ''
+loginSecret = ''
+if owned then
+    testlink
+    if result != 0 closett
+endif
+strlen stage
+if result > 0 then
+    strconcat err #13#10'サーバー一時領域（切断時に自動削除）: '
+    strconcat err stage
+endif
+strlen runDir
+if result > 0 then
+    strconcat err #13#10'Windows: '
+    strconcat err runDir
+endif
+if hasLocalRun then
+    makepath logFile runDir 'transfer.log'
+    fileopen logHandle logFile 1
+    if logHandle >= 0 then
+        filewriteln logHandle err
+        fileclose logHandle
+    endif
+endif
+if SHOW_RESULT messagebox err 'perf 取得エラー'
+setexitcode 1
+end
