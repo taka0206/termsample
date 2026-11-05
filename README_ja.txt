@@ -18,6 +18,8 @@
    SSH_HOST と REMOTE_PARENT を空欄にすると実行時に入力できます。
    LOCAL_BASE が空欄の場合は %USERPROFILE%\PerfDownloads に保存します。
    SSH_HOST はホスト名、FQDN または IPv4、LOCAL_BASE はドライブの絶対パスです。
+   AUTH_MODE は ask（毎回入力）、saved（Windows に暗号化保存）、
+   inline（コードに事前設定）から選べます。既定値は ask です。
 3. Tera Term 5.5.2 以降の ttpmacro.exe に GetPerf.ttl をドラッグ＆ドロップします。
    .ttl が関連付け済みならダブルクリックでも起動します。
    インストール先が次の場所なら、Windows PowerShell からも起動できます。
@@ -43,7 +45,25 @@
 再実行のたびに新しい保存フォルダーを作ります。実行中は perf.tar.gz.part、
 展開中は _extracting を使います。完了した perf フォルダーは最後に公開します。
 
-■ パスワード入力も自動化する場合
+■ パスワードをコードに事前設定する場合（inline）
+GetPerf.ttl 先頭の設定を次のように変更します。
+
+   AUTH_MODE     = 'inline'
+   SSH_PASSWORD  = 'ここに spfai001 の SSH パスワードを記載'
+   ROOT_PASSWORD = 'ここに su 用の root パスワードを記載'
+
+SSH と su には設定した値を使い、パスワード入力画面を省きます。
+両方の設定が必須です。空欄、制御文字、長さの上限超過は SSH 接続前にエラーにします。
+UTF-8 で各 240 バイト以内にしてください。SSH 用の二重引用符は自動でエスケープし、
+その後の長さも 240 バイト以内である必要があります。空白や日本語も使用できます。
+値に ' を含む場合は TTL の文字列を " で囲み、両方の引用符を含む場合は
+文字列と #39（'）または #34（"）を連結して指定してください。
+この方式では GetPerf.ttl にパスワードが平文で残るため、設定済みファイルの共有や
+Git への登録を避けてください。初回のホスト鍵確認と SHOW_RESULT の動作は他のモードと同じです。
+毎回入力に戻すには AUTH_MODE = 'ask'、暗号化保存に切り替えるには 'saved' にします。
+SSH_PASSWORD と ROOT_PASSWORD は inline のときだけ参照し、saved の保存内容は更新しません。
+
+■ Windows に暗号化して保存する場合（saved）
 接続先と REMOTE_PARENT を固定し、GetPerf.ttl 先頭の AUTH_MODE = 'saved' に変更します。
 初回の PowerShell 画面に SSH 用、root 用の順で入力してください。入力中は文字が隠れます。
 2 回目からは同じ Windows PC・同じ Windows ユーザーで保存認証を利用します。
@@ -65,7 +85,8 @@ Windows 11
    5.5.2 の getver は「5.5」を返し、メジャー・マイナー番号を比較するため、
    マクロの起動判定には getver ttver '5.5' を使用しています。
    使用中の sendbinary、scprecv、exec 等は公式 v5.5.2 ソースで確認済みです。
-   この修正の確認範囲はソース互換性と起動判定です。Windows 実機での通し試験は未実施です。
+   認証方式の分岐と入力検証は Tera Term 5.5.2 の実行ファイルで単体確認しています。
+   SSH と su を含む RHEL 実機での通し試験は未実施です。
    通常の Windows ユーザーで実行できます。保存先には書庫と展開データの両方の空きが必要です。
    ヘルパーには実行プロセス単位で -ExecutionPolicy Bypass を指定します。
    組織の GPO、AppLocker、WDAC 等でスクリプト実行が制限されている場合はその設定が適用されます。
@@ -117,6 +138,16 @@ UNIX ソケット等を tar が読み飛ばした場合や、読み取り中の�
    0   SHA-256 と件数を照合し、perf を展開済み
    2   SHA-256 を照合し、書庫のみ保存（理由は transfer.log）
    1   取得、検証、展開、または一時領域の削除確認に失敗
+
+■ 開発時の認証テスト
+リポジトリの tests\test_authentication.py を Python 3.10 以降で実行できます。
+通常の取得操作に Python は不要です。リポジトリのフォルダーで次を実行します。
+
+   python tests\test_authentication.py --ttpmacro 'C:\Program Files\teraterm5\ttpmacro.exe' -v
+
+ask、saved、inline の選択、引用符や日本語、空欄、制御文字、バイト数上限を検証します。
+SSH 接続と端末への入出力は行わないため、実サーバーでの接続・転送試験は別途必要です。
+配布用 ZIP は実行用の 4 ファイルだけを含み、テストコードはリポジトリで管理します。
 
 公式仕様
 Tera Term の scprecv    https://teratermproject.github.io/manual/5/ja/macro/command/scprecv.html

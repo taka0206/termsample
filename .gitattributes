@@ -1,0 +1,4 @@
+# Accept existing CRLF endings while checking trailing spaces and blank lines.
+GetPerf.ttl whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+PerfLocal.ps1 whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+README_ja.txt whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

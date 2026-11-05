@@ -4,7 +4,9 @@ SSH_HOST      = ''
 SSH_PORT      = 22
 REMOTE_PARENT = ''
 LOCAL_BASE    = ''
-AUTH_MODE     = 'ask'     ; ask = 毎回入力 / saved = 初回だけ登録（Windows DPAPI）
+AUTH_MODE     = 'ask'     ; ask = 毎回入力 / saved = DPAPI 保存 / inline = 下記を使用
+SSH_PASSWORD  = ''        ; inline 専用: spfai001 の SSH パスワード
+ROOT_PASSWORD = ''        ; inline 専用: su で使用する root のパスワード
 SHOW_RESULT   = 1         ; 0 = 完了・エラーのダイアログを省略
 TIME_LIMIT    = 7200      ; 書庫作成と SCP 受信のそれぞれの待ち時間（秒）
 
@@ -66,11 +68,9 @@ if result > 480 then
     err = '取得元のパスは UTF-8 で 480 バイト以内にしてください。'
     goto failed
 endif
-strmatch AUTH_MODE '\A(ask|saved)\z'
-if result = 0 then
-    err = 'AUTH_MODE は ask または saved です。'
-    goto failed
-endif
+call prepareAuthentication
+strlen err
+if result > 0 goto failed
 getdir scriptDir
 makepath collector scriptDir 'collect-perf.sh'
 makepath helper scriptDir 'PerfLocal.ps1'
@@ -148,7 +148,7 @@ if result != 1 then
 endif
 setecho 0
 sprintf2 conn '%s:%d /ssh /2 /auth=password /user=spfai001 /timeout=45' SSH_HOST SSH_PORT
-if worker then
+if usePassword then
     strlen loginSecret
     if result = 0 goto noCredential
     strlen rootSecret
@@ -203,7 +203,7 @@ waitregex 'PF_ROOT;' '(?i)^[ \t]*password[ \t]*:' failPattern
 if result = 3 goto remoteFail
 if result = 0 goto remoteTimeout
 if result = 2 then
-    if worker = 0 then
+    if usePassword = 0 then
         passwordbox 'su で使用する root のパスワード' 'RHEL root'
         rootSecret = inputstr
         inputstr = ''
@@ -268,6 +268,61 @@ endif
 if SHOW_RESULT messagebox msg 'perf 取得'
 setexitcode localRc
 end
+
+:prepareAuthentication
+usePassword = worker
+inlineMode = 0
+strcompare AUTH_MODE 'inline'
+if result = 0 && worker = 0 then
+    inlineMode = 1
+    usePassword = 1
+    loginSecret = SSH_PASSWORD
+    rootSecret = ROOT_PASSWORD
+endif
+SSH_PASSWORD = ''
+ROOT_PASSWORD = ''
+strmatch AUTH_MODE '\A(ask|saved|inline)\z'
+if result = 0 then
+    err = 'AUTH_MODE は ask、saved、inline のいずれかです。'
+    return
+endif
+if inlineMode = 0 return
+strlen loginSecret
+loginLength = result
+strlen rootSecret
+if loginLength = 0 || result = 0 then
+    err = 'inline モードでは SSH_PASSWORD と ROOT_PASSWORD の両方を設定してください。'
+    return
+endif
+if loginLength > 240 || result > 240 then
+    err = 'inline モードのパスワードは UTF-8 で 240 バイト以内にしてください。'
+    return
+endif
+strmatch loginSecret '[\x01-\x1f\x7f]'
+if result != 0 then
+    err = 'SSH_PASSWORD に制御文字は使用できません。'
+    return
+endif
+strmatch rootSecret '[\x01-\x1f\x7f]'
+if result != 0 then
+    err = 'ROOT_PASSWORD に制御文字は使用できません。'
+    return
+endif
+; TTSSH requires doubled quotes inside /passwd="...". Work backwards so
+; inserted quotes are not escaped again and UTF-8 bytes stay in place.
+quoteIndex = loginLength
+while quoteIndex > 0
+    strcopy loginSecret quoteIndex 1 secretChar
+    strcompare secretChar '"'
+    if result = 0 strinsert loginSecret quoteIndex '"'
+    quoteIndex = quoteIndex - 1
+endwhile
+secretChar = ''
+strlen loginSecret
+if result > 240 then
+    err = 'SSH_PASSWORD は二重引用符のエスケープ後に UTF-8 で 240 バイト以内にしてください。'
+endif
+return
 
 :missing
 err = 'GetPerf.ttl、PerfLocal.ps1、collect-perf.sh を同じフォルダーに置いてください。'
