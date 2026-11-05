@@ -18,7 +18,7 @@
    SSH_HOST と REMOTE_PARENT を空欄にすると実行時に入力できます。
    LOCAL_BASE が空欄の場合は %USERPROFILE%\PerfDownloads に保存します。
    SSH_HOST はホスト名、FQDN または IPv4、LOCAL_BASE はドライブの絶対パスです。
-3. Tera Term 5.6 以降の ttpmacro.exe に GetPerf.ttl をドラッグ＆ドロップします。
+3. Tera Term 5.5.2 以降の ttpmacro.exe に GetPerf.ttl をドラッグ＆ドロップします。
    .ttl が関連付け済みならダブルクリックでも起動します。
    インストール先が次の場所なら、Windows PowerShell からも起動できます。
 
@@ -61,7 +61,11 @@ SecureString を Windows DPAPI で暗号化しています。同じ Windows ア�
 
 ■ 実行環境
 Windows 11
-   Tera Term 5.6 以降（TTSSH と ttpmacro.exe を含む）、Windows PowerShell 5.1、標準の tar.exe。
+   Tera Term 5.5.2 以降（TTSSH と ttpmacro.exe を含む）、Windows PowerShell 5.1、標準の tar.exe。
+   5.5.2 の getver は「5.5」を返し、メジャー・マイナー番号を比較するため、
+   マクロの起動判定には getver ttver '5.5' を使用しています。
+   使用中の sendbinary、scprecv、exec 等は公式 v5.5.2 ソースで確認済みです。
+   この修正の確認範囲はソース互換性と起動判定です。Windows 実機での通し試験は未実施です。
    通常の Windows ユーザーで実行できます。保存先には書庫と展開データの両方の空きが必要です。
    ヘルパーには実行プロセス単位で -ExecutionPolicy Bypass を指定します。
    組織の GPO、AppLocker、WDAC 等でスクリプト実行が制限されている場合はその設定が適用されます。
@@ -119,3 +123,6 @@ Tera Term の scprecv    https://teratermproject.github.io/manual/5/ja/macro/com
 Tera Term の SSH 認証   https://teratermproject.github.io/manual/5/ja/commandline/ttssh.html
 Windows の tar          https://learn.microsoft.com/en-us/windows/tar/
 Windows の資格情報保存  https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/export-clixml?view=powershell-5.1
+
+Tera Term 5.5.2 のバージョン判定の実装
+https://github.com/TeraTermProject/teraterm/blob/v5.5.2/teraterm/ttpmacro/ttl.cpp

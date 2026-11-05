@@ -1,4 +1,4 @@
-﻿; Tera Term 5.6+ / TTSSH. Start THIS macro on Windows.
+﻿; Tera Term 5.5.2+ / TTSSH. Start THIS macro on Windows.
 ; ここだけ設定。空欄なら接続先と取得元はダイアログ、保存先はユーザープロファイル配下。
 SSH_HOST      = ''
 SSH_PORT      = 22
@@ -17,9 +17,11 @@ loginSecret = ''
 rootSecret = ''
 err = ''
 exitCode = 1
-getver ttver '5.6'
+; Tera Term 5.5.2 getver returns only major.minor (5.5).
+; Compare 5.5 here because this command does not check the patch version.
+getver ttver '5.5'
 if result < 0 then
-    err = 'Tera Term 5.6 以降で実行してください。'
+    err = 'Tera Term 5.5.2 以降で実行してください。'
     goto failed
 endif
 if paramcnt >= 2 then
